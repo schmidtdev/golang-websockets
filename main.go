@@ -7,7 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+  "encoding/json"
 )
+
+type Message struct {
+  Content string `json:"content"`
+  Type string `json:"type"`
+}
 
 func main() {
   http.HandleFunc("/ws", handleWebSocket)
@@ -71,9 +77,26 @@ func readAndRespond(reader *bufio.Reader, writer *bufio.Writer) {
     }
     fmt.Println("Received message:", message)
 
-    responseMessage := "Acknowledged: " + message
+    // Decode JSON
+    var receivedMsg Message
+    err = json.Unmarshal([]byte(message), &receivedMsg)
+    if err != nil {
+      fmt.Println("Error decoding JSON:", err)
+      continue
+    }
 
-    if err := writeFrame(writer, responseMessage); err != nil {
+    responseMsg := Message{
+      Content: "Acknowledged: " + receivedMsg.Content,
+      Type: "response",
+    }
+
+    responseBytes, err := json.Marshal(responseMsg)
+    if err != nil {
+      fmt.Println("Error encoding JSON:", err)
+      continue
+    }
+
+    if err := writeFrame(writer, string(responseBytes)); err != nil {
       fmt.Println("Error writing frame:", err)
       return
     }
