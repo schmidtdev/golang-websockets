@@ -13,6 +13,7 @@ import (
 type Message struct {
   Content string `json:"content"`
   Type string `json:"type"`
+  Channel string `json:"channel"`
 }
 
 func main() {
@@ -57,8 +58,19 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
   writer := bufio.NewWriter(conn)
 
   // Initial message
-  initialMessage := "Welcome, user!"
-  if err := writeFrame(writer, initialMessage); err != nil {
+  initialMessage := Message{
+    Content: "Hello User",
+    Type: "greeting",
+    Channel: "all",
+  }
+
+  initialBytes, err := json.Marshal(initialMessage) 
+  if err != nil {
+    fmt.Println("Error encoding JSON:", err)
+    return
+  }
+
+  if err := writeFrame(writer, string(initialBytes)); err != nil {
     fmt.Println("Error greeting the client:", err)
     return
   }
