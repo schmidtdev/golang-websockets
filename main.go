@@ -7,6 +7,7 @@ import (
 	"os"
 	"schmidtdev/golang-websockets/handlers"
 	"schmidtdev/golang-websockets/types"
+	"schmidtdev/golang-websockets/webgr"
 
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
@@ -35,14 +36,18 @@ func main() {
 	}
 
 	// Migrate the schema
-	db.AutoMigrate(&types.Channel{}, &types.Subscription{})
+	db.AutoMigrate(
+		&types.Channel{},
+		&types.Subscription{},
+		&webgr.WebgrPedido{},
+	)
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		handlers.WsHandler(w, r, db)
 	})
 
-	fmt.Println("Listening on :3000")
-	if err := http.ListenAndServe(":3000", nil); err != nil {
+	fmt.Println("Listening on :3001")
+	if err := http.ListenAndServe(":3001", nil); err != nil {
 		fmt.Println("Server error:", err)
 	}
 }

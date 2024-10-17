@@ -4,18 +4,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"schmidtdev/golang-websockets/types"
+	"schmidtdev/golang-websockets/webgr"
 	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		//origin := r.Header.Get("Origin")
-		//return origin == "http://localhost"
+		//return origin == "http://integracoes.webgrapp.com.br"
 		return true
 	},
 }
@@ -76,7 +80,8 @@ func HandleMessages(db *gorm.DB, ip string) {
 
 		var response = types.Message{}
 
-		if receivedMsg.Type == "subscription" {
+		switch receivedMsg.Type {
+		case "subscription":
 			var channel types.Channel
 			err := db.Where("name = ?", receivedMsg.Channel).First(&channel).Error
 
@@ -103,7 +108,7 @@ func HandleMessages(db *gorm.DB, ip string) {
 				response.Channel = receivedMsg.Channel
 				response.IP = ip
 			}
-		} else if receivedMsg.Type == "unsubscription" {
+		case "unsubscription":
 			var channel types.Channel
 			err := db.Where("name = ?", receivedMsg.Channel).First(&channel).Error
 
@@ -134,7 +139,137 @@ func HandleMessages(db *gorm.DB, ip string) {
 					response.IP = ip
 				}
 			}
-		} else {
+		case "get:subscriptions":
+			var subscriptions []types.Subscription
+			err := db.Where("ip = ?", ip).Joins("Channel").Find(&subscriptions).Error
+
+			if err != nil {
+				response.Content = "It's not possible to get your subscriptions right now..."
+				response.Type = "response"
+				response.Channel = "subscriptions"
+				response.IP = ip
+			} else {
+				response.Type = "response"
+				response.Channel = "subscriptions"
+				response.IP = ip
+
+				subscriptionList := []string{}
+				for _, subscription := range subscriptions {
+					subscriptionList = append(subscriptionList, subscription.Channel.Name)
+				}
+				response.Content = strings.Join(subscriptionList, "\n")
+			}
+		case "post:webgr_pedidos":
+			var receivedMsg types.Message
+			err := json.Unmarshal(message, &receivedMsg)
+			if err != nil {
+				fmt.Println("Error decoding message:", err)
+				continue
+			}
+
+			var pedidos []webgr.WebgrPedido
+			err = json.Unmarshal([]byte(receivedMsg.Content), &pedidos)
+			if err != nil {
+				fmt.Println("Error decoding pedidos:", err)
+				continue
+			}
+
+			for _, pedido := range pedidos {
+				err = db.Where("cdpedido = ?", pedido.Cdpedido).First(&webgr.WebgrPedido{}).Error
+				if err == nil {
+					err = db.Model(&pedido).Updates(map[string]interface{}{
+						"status":                     pedido.Status,
+						"obsinterna":                 pedido.Obsinterna,
+						"pedaviso":                   pedido.Pedaviso,
+						"cdaut":                      pedido.Cdaut,
+						"ftaut":                      pedido.Ftaut,
+						"nrnfe":                      pedido.Nrnfe,
+						"nrcfe":                      pedido.Nrcfe,
+						"erpstatus":                  pedido.Erpstatus,
+						"motivocancelamento":         pedido.Motivocancelamento,
+						"erpstatusdesc":              pedido.Erpstatusdesc,
+						"latitude":                   pedido.Latitude,
+						"longitude":                  pedido.Longitude,
+						"percentualcomissao":         pedido.Percentualcomissao,
+						"vrcomissao":                 pedido.Vrcomissao,
+						"vrbruto":                    pedido.Vrbruto,
+						"vrdesconto":                 pedido.Vrdesconto,
+						"vrdescontototal":            pedido.Vrdescontototal,
+						"vrdescontofinal":            pedido.Vrdescontofinal,
+						"percentualdescontofinal":    pedido.Percentualdescontofinal,
+						"tipodesconto":               pedido.Tipodesconto,
+						"vrdescontocondpgto":         pedido.Vrdescontocondpgto,
+						"percentualdescontocondpgto": pedido.Percentualdescontocondpgto,
+						"tipodescontocondpgto":       pedido.Tipodescontocondpgto,
+						"vrliquidototal":             pedido.Vrliquidototal,
+						"vrtotal":                    pedido.Vrtotal,
+						"cncondicaopgto":             pedido.Cncondicaopgto,
+						"cnformapgto":                pedido.Cnformapgto,
+					}).Error
+
+					if err != nil {
+						fmt.Println("Error updating pedido:", err)
+						continue
+					} else {
+						continue
+					}
+				} else {
+					err = db.Create(&pedido).Error
+					if err != nil {
+						fmt.Println("Error inserting pedido:", err)
+						continue
+					}
+				}
+			}
+
+			response.Content = "Orders have been inserted successfully."
+			response.Type = "response"
+			response.Channel = "webgr_pedidos"
+			response.IP = ip
+		case "get:webgr_pedidos":
+			dsn := fmt.Sprintf(
+				"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
+				os.Getenv("WEBGR_HOST"), os.Getenv("WEBGR_USER"), os.Getenv("WEBGR_PASSWORD"), os.Getenv("WEBGR_DB"), os.Getenv("WEBGR_PORT"), os.Getenv("WEBGR_SSL_MODE"),
+			)
+			db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+				Logger: logger.Default.LogMode(logger.Silent),
+			})
+
+			if err != nil {
+				response.Content = "It's not possible to connect to the database right now..."
+				response.Type = "response"
+				response.Channel = "pedidos"
+				response.IP = ip
+			}
+
+			var pedidos []webgr.WebgrPedido
+			err = db.Where("cnempresa = ? AND status = '70' ORDER BY cdpedido DESC LIMIT 40", 71).Find(&pedidos).Error
+
+			if err != nil {
+				response.Content = "It's not possible to get the orders right now..."
+				response.Type = "response"
+				response.Channel = "pedidos"
+				response.IP = ip
+			} else {
+				response.Type = "response"
+				response.Channel = "pedidos"
+				response.IP = ip
+
+				pedidosList := []map[string]interface{}{}
+				for _, pedido := range pedidos {
+					pedidosList = append(pedidosList, map[string]interface{}{
+						"cdpedido": pedido.Cdpedido,
+						"vrtotal":  pedido.Vrtotal,
+					})
+				}
+				content, err := json.Marshal(pedidosList)
+				if err != nil {
+					response.Content = "Error marshalling pedidos list"
+				} else {
+					response.Content = string(content)
+				}
+			}
+		default:
 			response.Content = "You have been unsubscribed from the channel"
 			response.Type = "unsubscription"
 			response.Channel = "general"
